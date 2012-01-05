@@ -113,7 +113,6 @@ class Poller(object):
     :param connection: The connection that needs to be polled.
     :param callbacks: A tuple/list of callbacks.
     """
-    # TODO: Accept new argument "is_connection"
     def __init__(self, connection, callbacks=(), ioloop=None):
         self._ioloop = ioloop or IOLoop.instance()
         self._connection = connection
@@ -122,23 +121,62 @@ class Poller(object):
     def start(self):
         """Start polling the connection.
         """
-        self._update_handler()
+        self._add_handler()
 
-    def _update_handler(self):
+    def _add_handler(self):
         state = self._connection.poll()
+
+        if state == psycopg2.extensions.POLL_READ:
+            n = (state, 'ADD READ')
+        elif state == psycopg2.extensions.POLL_WRITE:
+            n = (state, 'ADD WRITE')
+        else:
+            n = (state, 'ADD ?')
+        print self._connection.fileno(), '\t', n, '\t', \
+            [cb.func.__name__ for cb in self._callbacks]
+
+        if state == psycopg2.extensions.POLL_READ:
+            self._ioloop.add_handler(self._connection.fileno(),
+                self._update_handler, IOLoop.READ)
+        elif state == psycopg2.extensions.POLL_WRITE:
+            self._ioloop.add_handler(self._connection.fileno(),
+                self._update_handler, IOLoop.WRITE)
+
+    def _update_handler(self, fd, events):
+
+        print self._connection.fileno(), '\t', 'REMOVE'
+        self._ioloop.remove_handler(self._connection.fileno())
+
+        state = self._connection.poll()
+
+        if state == psycopg2.extensions.POLL_OK:
+            n = (state, 'OK')
+        elif state == psycopg2.extensions.POLL_READ:
+            n = (state, 'READ')
+        elif state == psycopg2.extensions.POLL_WRITE:
+            n = (state, 'WRITE')
+        else:
+            n = (state, '?')
+
+        if events == IOLoop.READ:
+            t = (events, 'READ')
+        elif events == IOLoop.WRITE:
+            t = (events, 'WRITE')
+
+        print self._connection.fileno(), '\t', n, '\t', t, '\t', \
+            [cb.func.__name__ for cb in self._callbacks]
+
         if state == psycopg2.extensions.POLL_OK:
             for callback in self._callbacks:
                 callback()
         elif state == psycopg2.extensions.POLL_READ:
             self._ioloop.add_handler(self._connection.fileno(),
-                self._io_callback, IOLoop.READ)
+                self._update_handler, IOLoop.READ)
         elif state == psycopg2.extensions.POLL_WRITE:
             self._ioloop.add_handler(self._connection.fileno(),
-                self._io_callback, IOLoop.WRITE)
+                self._update_handler, IOLoop.WRITE)
 
     def _io_callback(self, *args):
-        # Maybe keep track of the previous state so you can use update_handler
-        # instead of remove/add (Ben Darnell, mailinglist).
-        # For connections, not cursors. Cursors are closed after usage.
+        print self._connection.fileno(), '\t', 'REMOVE'
         self._ioloop.remove_handler(self._connection.fileno())
         self._update_handler()

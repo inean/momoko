@@ -44,6 +44,8 @@ class OverviewHandler(BaseHandler):
 class SingleQueryHandler(BaseHandler):
     @tornado.web.asynchronous
     def get(self):
+        print self.db
+        # self.write('Works?')
         # One simple query
         self.db.execute('SELECT 42, 12, 40, 11;', callback=self._on_response)
 

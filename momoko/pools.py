@@ -161,7 +161,7 @@ class AsyncPool(object):
                 cleanup_timeout * 1000)
             self._cleaner.start()
 
-    def _new_conn(self, new_cursor_args={}):
+    def _new_conn(self, callback=None):
         """Create a new connection.
 
         If `new_cursor_args` is provided a new cursor is created when the
@@ -171,18 +171,26 @@ class AsyncPool(object):
         """
         if len(self._pool) > self.max_conn:
             raise PoolError('connection pool exausted')
-        conn = psycopg2.connect(async=1, *self._args, **self._kwargs)
-        add_conn = functools.partial(self._add_conn, conn)
 
-        # TODO: Pass new argument to indicate a poller is created for a connection
-        if new_cursor_args:
-            new_cursor_args['connection'] = conn
-            new_cursor = functools.partial(self.new_cursor, **new_cursor_args)
-            Poller(conn, (add_conn, new_cursor), ioloop=self._ioloop).start()
+        if callback:
+            callbacks = (self._add_conn, callback)
         else:
-            Poller(conn, (add_conn,), ioloop=self._ioloop).start()
+            callbacks = (self._add_conn,)
 
-    def _add_conn(self, conn):
+        conn = _AsyncConnection(
+            callbacks=callbacks,
+            ioloop=self._ioloop,
+            *self._args, **self._kwargs)
+        # add_conn = functools.partial(self._add_conn, conn)
+
+        # if new_cursor_args:
+        #     new_cursor_args['connection'] = conn
+        #     new_cursor = functools.partial(self.new_cursor, **new_cursor_args)
+        #     Poller(conn, (add_conn, new_cursor), ioloop=self._ioloop).start()
+        # else:
+        #     Poller(conn, (add_conn,), ioloop=self._ioloop).start()
+
+    def _add_conn(self, connection):
         """Add a connection to the pool.
 
         This function is used by `_new_conn` as a callback to add the created
@@ -190,7 +198,7 @@ class AsyncPool(object):
 
         :param conn: A database connection.
         """
-        self._pool.append(conn)
+        self._pool.append(connection)
 
     def new_cursor(self, function, func_args=(), callback=None, connection=None):
         """Create a new cursor.
@@ -205,21 +213,20 @@ class AsyncPool(object):
         if not connection:
             connection = self._get_free_conn()
             if not connection:
-                new_cursor_args = {
-                    'function': function,
-                    'func_args': func_args,
-                    'callback': callback
-                }
-                self._new_conn(new_cursor_args)
+                self._new_conn(functools.partial(
+                    self.new_cursor, function, func_args, callback))
                 return
 
-        cursor = connection.cursor()
+        print connection
+        cursor = connection.cursor(callback)
         getattr(cursor, function)(*func_args)
 
-        # Callbacks from cursor functions always get the cursor back
-        if callback:
-            callback = functools.partial(callback, cursor)
-            Poller(cursor.connection, (callback,), ioloop=self._ioloop).start()
+        connection._ioloop.update_handler(connection._conn.fileno(), IOLoop.WRITE)
+
+        # # Callbacks from cursor functions always get the cursor back
+        # if callback:
+        #     callback = functools.partial(callback, cursor)
+        #     Poller(cursor.connection, (callback,), ioloop=self._ioloop).start()
 
     def _get_free_conn(self):
         """Look for a free connection and return it.
@@ -259,6 +266,56 @@ class AsyncPool(object):
                 conn.close()
         self._pool = []
         self.closed = True
+
+
+class _AsyncConnection(object):
+
+    def __init__(self, callbacks=None, ioloop=None, *args, **kwargs):
+        self._conn = psycopg2.connect(async=1, *args, **kwargs)
+        self._ioloop = ioloop or IOLoop.instance()
+        self._callbacks = [functools.partial(cb, connection=self) \
+            for cb in callbacks]
+
+        self._ioloop.add_handler(self._conn.fileno(),
+            self._handle_events, IOLoop.WRITE)
+
+    def close(self):
+        self._conn.close()
+
+    def cursor(self, callback):
+        c = self._conn.cursor()
+        # self._ioloop.update_handler(self._conn.fileno(), 0)
+        self._callbacks = functools.partial(callback, cursor=c)
+        return c
+
+    def isexecuting(self):
+        return self._conn.isexecuting()
+
+    def poll(self):
+        return self._conn.poll()
+
+    def fileno(self):
+        return self._conn.fileno()
+
+    def _handle_events(self, fd, events):
+        state = self._conn.poll()
+
+        if state == psycopg2.extensions.POLL_OK: n = (state, 'OK')
+        elif state == psycopg2.extensions.POLL_READ: n = (state, 'READ')
+        elif state == psycopg2.extensions.POLL_WRITE: n = (state, 'WRITE')
+        else: n = (state, '?')
+        if events == IOLoop.READ: t = (events, 'READ')
+        elif events == IOLoop.WRITE: t = (events, 'WRITE')
+        print self._conn.fileno(), '\t', n, '\t', t, '\t'
+
+        if state == psycopg2.extensions.POLL_OK:
+            for callback in self._callbacks:
+                callback()
+            self._callbacks = None
+        elif state == psycopg2.extensions.POLL_READ:
+            self._ioloop.update_handler(self._conn.fileno(), IOLoop.READ)
+        elif state == psycopg2.extensions.POLL_WRITE:
+            self._ioloop.update_handler(self._conn.fileno(), IOLoop.WRITE)
 
 
 class PoolError(Exception):
