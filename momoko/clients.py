@@ -106,7 +106,7 @@ class AsyncClient(object):
         """
         return QueryChain(self, queries, callback)
 
-    def execute(self, operation, parameters=(), callback=None):
+    def execute(self, operation, parameters=(), callback=None, args={}):
         """Prepare and execute a database operation (query or command).
 
         Parameters may be provided as sequence or mapping and will be bound to
@@ -122,9 +122,9 @@ class AsyncClient(object):
         :param callback: A callable that is executed once the operation is
                          finished. Optional.
         """
-        self._pool.new_cursor('execute', (operation, parameters), callback)
+        self._pool.new_cursor('execute', (operation, parameters), callback, cursor_args=args)
 
-    def callproc(self, procname, parameters=None, callback=None):
+    def callproc(self, procname, parameters=None, callback=None, args={}):
         """Call a stored database procedure with the given name.
 
         The sequence of parameters must contain one entry for each argument that
@@ -140,14 +140,17 @@ class AsyncClient(object):
         :param callback: A callable that is executed once the procedure is
                          finished. Optional.
         """
-        self._pool.new_cursor('callproc', (procname, parameters), callback)
+        self._pool.new_cursor('callproc', (procname, parameters), callback, cursor_args=args)
 
     def close(self):
         """Close all connections in the connection pool.
         """
         self._pool.close()
 
-
+    def cursor(self, *args, **kwargs):
+        connection = self._pool.get_connection()
+        return connection.cursor(*args, **kwargs)
+        
 class AdispClient(AsyncClient):
     """The AdispClient class is a wrapper for ``AsyncPool`` and uses adisp to
     let the developer use the ``execute``, ``callproc``, ``chain`` and ``batch``

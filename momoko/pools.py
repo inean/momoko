@@ -192,7 +192,7 @@ class AsyncPool(object):
         """
         self._pool.append(conn)
 
-    def new_cursor(self, function, func_args=(), callback=None, connection=None):
+    def new_cursor(self, function, func_args=(), callback=None, connection=None, cursor_args={}):
         """Create a new cursor.
 
         If there's no connection available, a new connection will be created and
@@ -208,12 +208,13 @@ class AsyncPool(object):
                 self._new_conn({
                     'function': function,
                     'func_args': func_args,
-                    'callback': callback
+                    'callback': callback,
+                    'cursor_args': cursor_args
                 })
                 return
 
         try:
-            cursor = connection.cursor()
+            cursor = connection.cursor(**cursor_args)
             getattr(cursor, function)(*func_args)
 
             # Callbacks from cursor functions always get the cursor back
@@ -228,7 +229,8 @@ class AsyncPool(object):
                 self._new_conn({
                     'function': function,
                     'func_args': func_args,
-                    'callback': callback
+                    'callback': callback,
+                    'cursor_args': cursor_args
                 })
             else:
                 self.new_cursor(function, func_args, callback, connection)
