@@ -17,14 +17,35 @@ import psycopg2.extensions
 from tornado.ioloop import IOLoop
 
 
-class QueryChain(object):
+class CollectionMixin(object):
+
+    methods = ('execute','callproc',)
+
+    def __init__(self, db, callback):
+        self._db = db
+        self._callback = callback
+
+    def _method(self, query):
+        method = query.pop(0) if query[0] in self.methods else 'execute'
+        return getattr(self._db, method)
+        
+    @staticmethod
+    def _cursor_args(query):
+        retval = query.pop() if isinstance(query[-1], dict) else {}
+        return retval
+
+    def _collect(self, cursor):
+        raise NotImplementedError
+
+        
+class QueryChain(CollectionMixin):
     """Run a chain of queries in the given order.
 
     A list/tuple with queries looks like this::
 
         (
-            ['SELECT 42, 12, %s, 11;', (23,)],
-            'SELECT 1, 2, 3, 4, 5;'
+            [query, 'SELECT 42, 12, %s, 11;', (23,), {})],
+             'SELECT 1, 2, 3, 4, 5;'
         )
 
     A query with paramaters is contained in a list: ``['some sql
@@ -38,11 +59,10 @@ class QueryChain(object):
     :return: A list with the resulting cursors is passed on to the callback.
     """
     def __init__(self, db, queries, callback):
-        self._db = db
+        super(QueryChain, self).__init__(db, callback)
         self._cursors = []
         self._queries = list(queries)
         self._queries.reverse()
-        self._callback = callback
         self._collect(None)
 
     def _collect(self, cursor):
@@ -53,12 +73,13 @@ class QueryChain(object):
                 self._callback(self._cursors)
             return
         query = self._queries.pop()
-        if isinstance(query, str):
+        if isinstance(query, basestring):
             query = [query]
-        self._db.execute(*query, callback=self._collect)
+        cargs = self._cursor_args(query)
+        self._method(query)(*query, callback=self._collect, args=cargs)
 
 
-class BatchQuery(object):
+class BatchQuery(CollectionMixin):
     """Run a batch of queries all at once.
 
     **Note:** Every query needs a free connection. So if three queries are
@@ -84,20 +105,20 @@ class BatchQuery(object):
              resulting cursors as values is passed on to the callback.
     """
     def __init__(self, db, queries, callback):
-        self._db = db
-        self._callback = callback
+        super(BatchQuery, self).__init__(db, callback)
         self._queries = {}
         self._args = {}
         self._size = len(queries)
 
         for key, query in list(queries.items()):
-            if isinstance(query, str):
+            if isinstance(query, basestring):
                 query = [query, ()]
+            cargs = self._cursor_args(query)
             query.append(functools.partial(self._collect, key))
-            self._queries[key] = query
-
-        for query in list(self._queries.values()):
-            self._db.execute(*query)
+            self._queries[key] = (query, cargs,)
+            
+        for query, cargs in list(self._queries.values()):
+            self._method(query)(*query, args=cargs)
 
     def _collect(self, key, cursor):
         self._size = self._size - 1
