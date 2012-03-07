@@ -210,7 +210,7 @@ class AsyncPool(object):
             callback(*(callback_args+[connection]))
 
 
-    def new_cursor(self, function, function_args=(), callback=None, cursor_kwargs={}, connection=None, transaction=False):
+    def new_cursor(self, function, function_args=(), cursor_factory=None, callback=None, connection=None, transaction=False):
         """Create a new cursor.
 
         If there's no connection available, a new connection will be created and
@@ -224,6 +224,11 @@ class AsyncPool(object):
 
         .. _connection.cursor: http://initd.org/psycopg/docs/connection.html#connection.cursor
         """
+
+        cursor_kwargs = {}
+        if cursor_factory is not None:
+            cursor_kwargs["cursor_factory"] = cursor_factory
+            
         if connection is not None:
             try:
                 connection.cursor(function, function_args, callback, cursor_kwargs)
@@ -234,7 +239,7 @@ class AsyncPool(object):
 
         # if no connection, or if exception caught
         if not transaction:
-            self.get_connection(callback=self.new_cursor, callback_args=[function, function_args, callback, cursor_kwargs])
+            self.get_connection(callback=self.new_cursor, callback_args=[function, function_args, cursor_factory, callback])
         else:
             raise TransactionError
 
