@@ -111,6 +111,13 @@ class ConnectionPool(object):
                 cleanup_timeout * 1000)
             self._cleaner.start()
 
+    def __enter__(self):
+        return self._get_connection() or self._new_connection()
+        
+    def __exit__(self, etype, evalue, traceback):
+        if type(etype) in (psycopg2.Warning, psycopg2.Error,):
+            log.error('An error occurred: {0}'.format(evalue))
+
     def _new_connection(self, callback=None):
         if len(self._pool) > self._maxconn:
             raise PoolError('connection pool exausted')
