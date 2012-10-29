@@ -173,7 +173,7 @@ class ConnectionPool(object):
         transaction(connection, statements, cursor_factory, callback)
 
     def execute(self, operation, parameters=(), cursor_factory=None,
-                callback=_dummy_callback, retries=5, connection=None, error=None):
+                callback=_dummy_callback, retries=0, connection=None, error=None):
         connection = connection or self._get_connection()
         if connection is None:
             self._new_connection(partial(self.execute, operation,
@@ -191,7 +191,7 @@ class ConnectionPool(object):
                 parameters, cursor_factory, callback, retries-1))
 
     def callproc(self, procname, parameters=(), cursor_factory=None,
-                callback=_dummy_callback, retries=5, connection=None, error=None):
+                callback=_dummy_callback, retries=0, connection=None, error=None):
         connection = connection or self._get_connection()
         if connection is None:
             self._new_connection(partial(self.callproc, procname,
@@ -209,7 +209,7 @@ class ConnectionPool(object):
                 parameters, cursor_factory, callback, retries-1))
 
     def mogrify(self, operation, parameters=(), callback=_dummy_callback,
-                retries=5, connection=None, error=None):
+                retries=0, connection=None, error=None):
         connection = connection or self._get_connection()
         if connection is None:
             self._new_connection(partial(self.mogrify, operation, parameters,
