@@ -194,7 +194,7 @@ class ConnectionPool(object):
                 callback=_dummy_callback, retries=5, connection=None, error=None):
         connection = connection or self._get_connection()
         if connection is None:
-            self._new_connection(partial(self.callproc, operation,
+            self._new_connection(partial(self.callproc, procname,
                 parameters, cursor_factory, callback, retries))
             return
 
@@ -205,7 +205,7 @@ class ConnectionPool(object):
             if retries == 0:
                 raise e
             self._pool.remove(connection)
-            self._ioloop.add_callback(partial(self.callproc, operation,
+            self._ioloop.add_callback(partial(self.callproc, procname,
                 parameters, cursor_factory, callback, retries-1))
 
     def mogrify(self, operation, parameters=(), callback=_dummy_callback,
