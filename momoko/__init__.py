@@ -15,5 +15,5 @@ __version__ = '0.5.0'
 __license__ = 'MIT'
 
 
-from .clients import BlockingClient, AsyncClient
-from .pools import BlockingPool, AsyncPool, PoolError
+from .clients import AsyncClient
+from .pools import ConnectionPool, PoolError
