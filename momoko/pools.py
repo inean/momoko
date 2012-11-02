@@ -48,7 +48,6 @@ class ConnectionPool(object):
         self._connection_factory = connection_factory
         self._ioloop = ioloop or IOLoop.instance()
         self._last_reconnect = 0
-        self._cleanup_timeout = 10
         self._pool = []
 
         self.closed = False

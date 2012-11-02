@@ -10,6 +10,7 @@
 """
 
 import functools
+import logging as log
 from contextlib import contextmanager
 
 from .pools import ConnectionPool
@@ -21,14 +22,16 @@ class AsyncClient(object):
      and ``callproc`` functions.
 
     """
+    TIMEOUT = 10
+    
     def __init__(self, *args, **kwargs):
-        self._pool = ConnectionPool(*args, **kwargs):
+        self._pool = ConnectionPool(*args, **kwargs)
 
     @property
     @contextmanager
     def connection(self):
         conn = self._pool._get_free_conn() or \
-               self._pool._new_conn().wait(self._cleanup_timeout)
+               self._pool._new_conn().wait(self.TIMEOUT)
         try:
             yield conn
         except Exception, err:
