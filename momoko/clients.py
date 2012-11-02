@@ -9,47 +9,11 @@
     :license: MIT, see LICENSE for more details.
 """
 
-
 import functools
 from contextlib import contextmanager
 
-from .pools import AsyncPool, BlockingPool
+from .pools import ConnectionPool
 from .utils import BatchQuery, QueryChain, TransactionChain
-
-
-class BlockingClient(object):
-    """The ``BlockingClient`` class is a wrapper around the ``psycopg2`` module
-    and provides some extra functionality.
-
-    :param settings: A dictionary that is passed to the ``BlockingPool`` object.
-    """
-    def __init__(self, settings):
-        self._pool = BlockingPool(**settings)
-
-    def __del__(self):
-        self._pool.close()
-
-    @property
-    @contextmanager
-    def connection(self):
-        """Create a context for a connection and commit changes on exit.
-
-        For example::
-
-            with self.db.connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('SELECT 42, 12, 40, 11;')
-        """
-        conn = self._pool.get_connection()
-        try:
-            yield conn
-        except:
-            conn.rollback()
-            raise
-        else:
-            conn.commit()
-
-
 
 class AsyncClient(object):
     """The ``AsyncClient`` class is a wrapper for ``AsyncPool``, ``BatchQuery``
@@ -61,6 +25,20 @@ class AsyncClient(object):
     def __init__(self, settings):
         self._pool = AsyncPool(**settings)
 
+    @property
+    @contextmanager
+    def connection(self):
+        conn = self._pool._get_free_conn() or \
+               self._pool._new_conn().wait(self._cleanup_timeout)
+        try:
+            yield conn
+        except Exception, err:
+            log.error('An error occurred: {0}'.format(err))
+            conn.rollback()
+        else:
+            conn.commit()
+        
+        
     def batch(self, queries, callback=None):
         """Run a batch of queries all at once.
 
