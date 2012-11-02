@@ -20,10 +20,9 @@ class AsyncClient(object):
      ``TransactionChain'' and ``QueryChain``. It also provides the ``execute``
      and ``callproc`` functions.
 
-    :param settings: A dictionary that is passed to the ``AsyncPool`` object.
     """
-    def __init__(self, settings):
-        self._pool = AsyncPool(**settings)
+    def __init__(self, *args, **kwargs):
+        self._pool = ConnectionPool(*args, **kwargs):
 
     @property
     @contextmanager
