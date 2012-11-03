@@ -78,7 +78,7 @@ class ConnectionPool(object):
         if timenow > timeout or len(self._pool) <= self._minconn:
             self._last_reconnect = timenow
             conn = AsyncConnection(self._ioloop)
-            callbacks = [partial(self._pool.append, conn)] # add new connection to the pool
+            callbacks = [partial(lambda conn, _: self._pool.append, conn)] # add new connection to the pool
             if callback:
                 callbacks.append(partial(callback, *(callback_args+[conn])))
 
@@ -209,11 +209,15 @@ class AsyncConnection(object):
         self._ioloop.update_handler(self._fileno, IOLoop.READ)
 
     def _io_callback(self, fd, events):
-        state = self._conn.poll()
-
+        try:
+            error = None
+            state = self._conn.poll()
+        except (psycopg2.Warning, psycopg2.Error) as err:
+            error = err
+            state = psycopg2.extensions.POLL_OK
         if state == psycopg2.extensions.POLL_OK:
             for callback in self._callbacks:
-                callback()
+                callback(error)
         elif state == psycopg2.extensions.POLL_READ:
             self._ioloop.update_handler(self._fileno, IOLoop.READ)
         elif state == psycopg2.extensions.POLL_WRITE:
