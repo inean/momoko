@@ -179,11 +179,11 @@ class AsyncPool(object):
         if new_cursor_args:
             new_cursor_args['connection'] = conn
             new_cursor = functools.partial(self.new_cursor, **new_cursor_args)
-            Poller(conn, (add_conn, new_cursor), ioloop=self._ioloop)
+            Poller(conn, (add_conn, lambda x: new_cursor()), ioloop=self._ioloop)
         else:
             Poller(conn, (add_conn,), ioloop=self._ioloop)
 
-    def _add_conn(self, conn):
+    def _add_conn(self, conn, error):
         """Add a connection to the pool.
 
         This function is used by `_new_conn` as a callback to add the created

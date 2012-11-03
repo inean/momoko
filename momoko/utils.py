@@ -143,10 +143,15 @@ class Poller(object):
         self._update_handler()
 
     def _update_handler(self):
-        state = self._connection.poll()
+        try:
+            error = None
+            state = self._connection.poll()
+        except (psycopg2.Warning, psycopg2.Error) as err:
+            error = err
+            state = psycopg2.extensions.POLL_OK
         if state == psycopg2.extensions.POLL_OK:
             for callback in self._callbacks:
-                callback()
+                callback(error)
         elif state == psycopg2.extensions.POLL_READ:
             self._ioloop.add_handler(self._connection.fileno(),
                 self._io_callback, IOLoop.READ)
