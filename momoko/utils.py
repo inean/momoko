@@ -34,7 +34,7 @@ class CollectionMixin(object):
         retval = query.pop(-1) if type(query[-1]) == type else None
         return retval
 
-    def _collect(self, cursor):
+    def _collect(self, cursor, error):
         raise NotImplementedError
 
         
@@ -63,13 +63,15 @@ class QueryChain(CollectionMixin):
     def __init__(self, db, queries, callback):
         super(QueryChain, self).__init__(db, callback)
         self._cursors = []
+        self._errors  = []
         self._queries = list(queries)
         self._queries.reverse()
         self._collect(None)
 
-    def _collect(self, cursor):
+    def _collect(self, cursor, error):
         if cursor is not None:
             self._cursors.append(cursor)
+            self._errors.append(error)
         if not self._queries:
             if self._callback:
                 self._callback(self._cursors)
@@ -122,11 +124,11 @@ class BatchQuery(CollectionMixin):
         for query, factory, callback in list(self._queries.values()):
             self._method(query)(*query, cursor_factory=factory, callback=callback)
 
-    def _collect(self, key, cursor):
+    def _collect(self, key, cursor, error):
         self._size -= 1
-        self._args[key] = cursor
+        self._args[key] = (cursor, error,)
         if not self._size and self._callback:
-            self._callback(self._args)
+            self._callback(*self._args)
 
             
 class TransactionChain(CollectionMixin):
@@ -154,6 +156,7 @@ class TransactionChain(CollectionMixin):
     def __init__(self, db, statements, callback):
         super(TransactionChain, self).__init__(db, callback)
         self._cursors = []
+        self._errors  = []
         self._statements = list(statements)
         self._statements.reverse()
         self._db._pool.get_connection(self._set_connection)
@@ -163,12 +166,13 @@ class TransactionChain(CollectionMixin):
         self._db._pool._pool.remove(conn) # don't let other connections mess up the transaction
         self._collect(None)
 
-    def _collect(self, cursor):
+    def _collect(self, cursor, error):
         if cursor is not None:
             self._cursors.append(cursor)
+            self._errors.append(error)
         if not self._statements:
             if self._callback:
-                self._callback(self._cursors)
+                self._callback(self._cursors, self._errors)
             self._db._pool._pool.append(self._connection)
             return
         statement = self._statements.pop()
