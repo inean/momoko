@@ -9,12 +9,12 @@
     :license: MIT, see LICENSE for more details.
 """
 
-
-import functools
-
 import psycopg2
 import psycopg2.extensions
+
+from functools import partial
 from tornado.ioloop import IOLoop
+from itertools import izip, islice, chain
 
 
 class CollectionMixin(object):
@@ -74,7 +74,7 @@ class QueryChain(CollectionMixin):
             self._errors.append(error)
         if not self._queries:
             if self._callback:
-                self._callback(self._cursors)
+                self._callback(self._cursors, self._errors)
             return
         query = self._queries.pop()
         if isinstance(query, basestring):
@@ -118,7 +118,7 @@ class BatchQuery(CollectionMixin):
             if isinstance(query, basestring):
                 query = [query, ()]
             factory   = self._cursor_factory(query)
-            callback  = functools.partial(self._collect, key)
+            callback  = partial(self._collect, key)
             self._queries[key] = (query, factory, callback)
             
         for query, factory, callback in list(self._queries.values()):
@@ -128,7 +128,15 @@ class BatchQuery(CollectionMixin):
         self._size -= 1
         self._args[key] = (cursor, error,)
         if not self._size and self._callback:
-            self._callback(self._args)
+            cursors = dict(
+                izip(self._args.iterkeys(),
+                     islice(chain(*self._args.itervalues()), 0, None, 2))
+            )
+            errors  = dict(
+                izip(self._args.iterkeys(),
+                     islice(chain(*self._args.itervalues()), 1, None, 2))
+            )
+            self._callback(cursors, errors)
 
             
 class TransactionChain(CollectionMixin):
