@@ -27,20 +27,6 @@ class AsyncClient(object):
     def __init__(self, *args, **kwargs):
         self._pool = ConnectionPool(*args, **kwargs)
 
-    @property
-    @contextmanager
-    def connection(self):
-        conn = self._pool._get_free_conn() or \
-               self._pool._new_conn().wait(self.TIMEOUT)
-        try:
-            yield conn
-        except Exception, err:
-            log.error('An error occurred: {0}'.format(err))
-            conn.rollback()
-        else:
-            conn.commit()
-        
-        
     def batch(self, queries, callback=None):
         """Run a batch of queries all at once.
 
