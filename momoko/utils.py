@@ -31,7 +31,7 @@ class CollectionMixin(object):
         
     @staticmethod
     def _cursor_factory(query):
-        retval = query.pop() if isinstance(query[-1], object) else None
+        retval = query.pop(-1) if type(query[-1]) == type else None
         return retval
 
     def _collect(self, cursor):
@@ -115,12 +115,12 @@ class BatchQuery(CollectionMixin):
         for key, query in list(queries.items()):
             if isinstance(query, basestring):
                 query = [query, ()]
-            factory = self._cursor_factory(query)
-            query.append(functools.partial(self._collect, key))
-            self._queries[key] = (query, factory,)
+            factory   = self._cursor_factory(query)
+            callback  = functools.partial(self._collect, key)
+            self._queries[key] = (query, factory, callback)
             
-        for query, factory in list(self._queries.values()):
-            self._method(query)(*query, cursor_factory=factory)
+        for query, factory, callback in list(self._queries.values()):
+            self._method(query)(*query, cursor_factory=factory, callback=callback)
 
     def _collect(self, key, cursor):
         self._size -= 1
