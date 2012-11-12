@@ -128,7 +128,7 @@ class BatchQuery(CollectionMixin):
         self._size -= 1
         self._args[key] = (cursor, error,)
         if not self._size and self._callback:
-            self._callback(*self._args)
+            self._callback(self._args)
 
             
 class TransactionChain(CollectionMixin):
