@@ -27,6 +27,9 @@ class AsyncClient(object):
     def __init__(self, *args, **kwargs):
         self._pool = ConnectionPool(*args, **kwargs)
 
+    def get_connection(self, callback, callback_args=[]):
+        self._pool.get_connection(callback, callback_args)
+        
     def batch(self, queries, callback=None):
         """Run a batch of queries all at once.
 
