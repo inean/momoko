@@ -12,7 +12,7 @@
 
 import re
 import json
-import route
+import btlroute
 import itertools
 import collections
 import contextlib
@@ -152,7 +152,7 @@ class Directions(OneToMany):
 class InvalidRuleException(Exception):
     pass
 
-class JSONPath(route.Path):
+class JSONPath(btlroute.Path):
     pass
 
 class JSONContext(object):
@@ -200,7 +200,10 @@ class JSONMapper(object):
         def create_task(operation, path, value):
             """Returns first matching rule for operation and path"""
             for route in self.verbs[operation]:
-                args = route.path.match(path)
+                try:
+                    args = route.path.match(path)
+                except btlroute.RouteNotFoundError, err:
+                    continue
                 if args is not None:
                     if callable(route.hook):
                         args = route.hook(args, value, **kwargs)

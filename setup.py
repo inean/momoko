@@ -18,7 +18,8 @@ setup(
     license='MIT',
     install_requires=[
         'tornado',
-        'psycopg2'
+        'psycopg2',
+        'btlroute',
     ],
     classifiers = [
         'Development Status :: 4 - Beta',
