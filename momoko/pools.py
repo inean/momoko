@@ -136,7 +136,7 @@ class ConnectionPool(object):
                 return
             except (DatabaseError, InterfaceError):  # Recover from lost connection
                 log.warning('Requested connection was closed')
-                connection in self._pool and self._pool.remove(connection)
+                self._pool.remove(connection)
 
         # if no connection, or if exception caught
         if not transaction:
@@ -217,7 +217,10 @@ class AsyncConnection(object):
             state = psycopg2.extensions.POLL_OK
         if state == psycopg2.extensions.POLL_OK:
             for callback in self._callbacks:
-                callback(error)
+                try:
+                    callback(error)
+                except Exception, err:
+                    log.warning('Unexpected error on while processing errors:' + err.message)
         elif state == psycopg2.extensions.POLL_READ:
             self._ioloop.update_handler(self._fileno, IOLoop.READ)
         elif state == psycopg2.extensions.POLL_WRITE:
