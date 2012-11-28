@@ -136,7 +136,7 @@ class ConnectionPool(object):
                 return
             except (DatabaseError, InterfaceError):  # Recover from lost connection
                 log.warning('Requested connection was closed')
-                self._pool.remove(connection)
+                connection in self._pool and self._pool.remove(connection)
 
         # if no connection, or if exception caught
         if not transaction:
