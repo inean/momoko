@@ -217,10 +217,7 @@ class AsyncConnection(object):
             state = psycopg2.extensions.POLL_OK
         if state == psycopg2.extensions.POLL_OK:
             for callback in self._callbacks:
-                try:
-                    callback(error)
-                except Exception, err:
-                    log.warning('Unexpected error on while processing errors:' + err.message)
+                callback(error)
         elif state == psycopg2.extensions.POLL_READ:
             self._ioloop.update_handler(self._fileno, IOLoop.READ)
         elif state == psycopg2.extensions.POLL_WRITE:

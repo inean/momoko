@@ -66,7 +66,7 @@ class QueryChain(CollectionMixin):
         self._errors  = []
         self._queries = list(queries)
         self._queries.reverse()
-        self._collect(None)
+        self._collect(None, None)
 
     def _collect(self, cursor, error):
         if cursor is not None:
@@ -169,10 +169,14 @@ class TransactionChain(CollectionMixin):
         self._statements.reverse()
         self._db._pool.get_connection(self._set_connection)
 
-    def _set_connection(self, conn):
+    def _set_connection(self, conn, _):
         self._connection = conn
-        self._db._pool._pool.remove(conn) # don't let other connections mess up the transaction
-        self._collect(None)
+        try:
+            # don't let other connections mess up the transaction
+            self._db._pool._pool.remove(conn)
+        except ValueError:
+            pass
+        self._collect(None, None)
 
     def _collect(self, cursor, error):
         if cursor is not None:
@@ -184,11 +188,12 @@ class TransactionChain(CollectionMixin):
             self._db._pool._pool.append(self._connection)
             return
         statement = self._statements.pop()
-        if isinstance(statement, str):
+        if isinstance(statement, basestring):
             statement = [statement]
         factory = self._cursor_factory(statement)
-        self._db.execute(*statement,
-                         cursor_factory=factory,
-                         callback=self._collect, connection=self._connection)
+        self._method(statement)(*statement,
+                                cursor_factory=factory,
+                                callback=self._collect,
+                                connection=self._connection)
 
 
