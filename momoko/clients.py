@@ -130,7 +130,7 @@ class AsyncClient(object):
         else:
             self._pool.new_cursor('execute', (operation, parameters), cursor_factory, callback)
 
-    def callproc(self, procname, parameters=None, cursor_factory=None, callback=None):
+    def callproc(self, procname, parameters=None, cursor_factory=None, callback=None, connection = None):
         """Call a stored database procedure with the given name.
 
         The sequence of parameters must contain one entry for each argument that
@@ -149,7 +149,10 @@ class AsyncClient(object):
 
         .. _connection.cursor: http://initd.org/psycopg/docs/connection.html#connection.cursor
         """
-        self._pool.new_cursor('callproc', (procname, parameters), cursor_factory, callback)
+        if connection:
+            self._pool.new_cursor('callproc', (procname, parameters), cursor_factory, callback, connection, transaction=True)
+        else:
+            self._pool.new_cursor('callproc', (procname, parameters), cursor_factory, callback)
 
     def close(self):
         """Close all connections in the connection pool.
