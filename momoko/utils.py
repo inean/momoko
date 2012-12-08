@@ -169,7 +169,7 @@ class TransactionChain(CollectionMixin):
         self._statements.reverse()
         self._db._pool.get_connection(self._set_connection)
 
-    def _set_connection(self, conn, _):
+    def _set_connection(self, conn, _=None):
         self._connection = conn
         try:
             # don't let other connections mess up the transaction
