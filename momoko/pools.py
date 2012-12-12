@@ -134,9 +134,9 @@ class ConnectionPool(object):
             try:
                 connection.cursor(function, function_args, callback, cursor_kwargs)
                 return
-            except (DatabaseError, InterfaceError):  # Recover from lost connection
-                log.warning('Requested connection was closed')
-                self._pool.remove(connection)
+            except (DatabaseError, InterfaceError),  err:  # Recover from lost connection
+                log.warning('Requested connection was closed. Reason: %s' % err.message)
+                connection in self._pool and self._pool.remove(connection)
 
         # if no connection, or if exception caught
         if not transaction:
