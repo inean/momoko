@@ -40,11 +40,10 @@ class ConnectionPool(object):
     - **ioloop** --
         An instance of Tornado's IOLoop.
     """
-    def __init__(self, dsn, connection_factory=None, minconn=1, maxconn=20,
-                 cleanup_timeout=10, ioloop=None):
+    def __init__(self, dsn, connection_factory=None, size=1, ioloop=None):
         self._dsn = dsn
-        self._minconn = minconn
-        self._maxconn = maxconn
+        self._minconn = size
+        self._maxconn = size
         self._connection_factory = connection_factory
         self._ioloop = ioloop or IOLoop.instance()
         self._last_reconnect = 0
@@ -57,20 +56,12 @@ class ConnectionPool(object):
             self._new_conn()
         self._last_reconnect = time.time()
 
-        # Create a periodic callback that tries to close inactive connections
-        if cleanup_timeout > 0:
-            self._cleaner = PeriodicCallback(self._clean_pool,
-                cleanup_timeout * 1000)
-            self._cleaner.start()
-
     def _new_conn(self, callback=None, callback_args=[]):
         """Create a new connection.
 
         :param callback_args: Parameters for the callback - connection will be appended
         to the parameters
         """
-        if len(self._pool) > self._maxconn:
-            self._clean_pool()
         if len(self._pool) > self._maxconn:
             raise PoolError('connection pool exhausted')
         timeout = self._last_reconnect + .25 # 1/4 second delay between reconnection
@@ -129,7 +120,7 @@ class ConnectionPool(object):
         cursor_kwargs = {}
         if cursor_factory is not None:
             cursor_kwargs["cursor_factory"] = cursor_factory
-            
+
         if connection is not None:
             try:
                 connection.cursor(function, function_args, callback, cursor_kwargs)
@@ -144,23 +135,6 @@ class ConnectionPool(object):
         else:
             raise TransactionError
 
-
-    def _clean_pool(self):
-        """Close a number of inactive connections when the number of connections
-        in the pool exceeds the number in `min_conn`.
-        """
-        if self.closed:
-            raise PoolError('connection pool is closed')
-        if len(self._pool) > self._minconn:
-            conns = len(self._pool) - self._minconn
-            for conn in self._pool[:]:
-                if not conn.isexecuting():
-                    conn.close()
-                    conns -= 1
-                    self._pool.remove(conn)
-                    if not conns:
-                        break
-
     def close(self):
         """Close all open connections in the pool.
         """
@@ -169,7 +143,6 @@ class ConnectionPool(object):
         for conn in self._pool:
             if not conn.closed:
                 conn.close()
-        self._cleaner.stop()
         self._pool = []
         self.closed = True
 
@@ -210,18 +183,22 @@ class AsyncConnection(object):
 
     def _io_callback(self, fd, events):
         try:
-            error = None
             state = self._conn.poll()
-        except (psycopg2.Warning, psycopg2.Error) as err:
-            error = err
-            state = psycopg2.extensions.POLL_OK
-        if state == psycopg2.extensions.POLL_OK:
+        except (psycopg2.Warning, psycopg2.Error) as error:
+            self.ioloop.remove_handler(self._fileno)
             for callback in self._callbacks:
                 callback(error)
-        elif state == psycopg2.extensions.POLL_READ:
-            self._ioloop.update_handler(self._fileno, IOLoop.READ)
-        elif state == psycopg2.extensions.POLL_WRITE:
-            self._ioloop.update_handler(self._fileno, IOLoop.WRITE)
+        else:
+            if state == psycopg2.extensions.POLL_OK:
+                self.ioloop.remove_handler(self._fileno)
+                for callback in self._callbacks:
+                    callback(error)
+            elif state == psycopg2.extensions.POLL_READ:
+                self._ioloop.update_handler(self._fileno, IOLoop.READ)
+            elif state == psycopg2.extensions.POLL_WRITE:
+                self._ioloop.update_handler(self._fileno, IOLoop.WRITE)
+            else:
+                raise psycopg2.OperationalError('poll() returned {0}'.format(state))
 
     def open(self, dsn, connection_factory=None, callbacks=[]):
         """
@@ -276,7 +253,7 @@ class AsyncConnection(object):
                 retval = select.select([self._conn.fileno()], [], [], timeout)
             if retval[0] == retval[1]:
                 raise psycopg2.OperationalError("timeout for connection")
- 
+
     def close(self):
         """Close connection.
         """
