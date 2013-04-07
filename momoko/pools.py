@@ -15,10 +15,10 @@ import logging as log
 
 import psycopg2
 from psycopg2 import DatabaseError, InterfaceError
-from psycopg2.extensions import STATUS_READY
+from psycopg2.extensions import POLL_OK, POLL_READ, POLL_WRITE
 
 from functools import partial
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import IOLoop
 
 
 class ConnectionPool(object):
@@ -185,17 +185,17 @@ class AsyncConnection(object):
         try:
             state = self._conn.poll()
         except (psycopg2.Warning, psycopg2.Error) as error:
-            self.ioloop.remove_handler(self._fileno)
+            self._ioloop.remove_handler(self._fileno)
             for callback in self._callbacks:
                 callback(error)
         else:
-            if state == psycopg2.extensions.POLL_OK:
-                self.ioloop.remove_handler(self._fileno)
+            if state == POLL_OK:
+                self._ioloop.remove_handler(self._fileno)
                 for callback in self._callbacks:
                     callback(error)
-            elif state == psycopg2.extensions.POLL_READ:
+            elif state == POLL_READ:
                 self._ioloop.update_handler(self._fileno, IOLoop.READ)
-            elif state == psycopg2.extensions.POLL_WRITE:
+            elif state == POLL_WRITE:
                 self._ioloop.update_handler(self._fileno, IOLoop.WRITE)
             else:
                 raise psycopg2.OperationalError('poll() returned {0}'.format(state))
@@ -245,11 +245,11 @@ class AsyncConnection(object):
         assert self._conn
         while 1:
             state = self._conn.poll()
-            if state == psycopg2.extensions.POLL_OK:
+            if state == POLL_OK:
                 break
-            elif state == psycopg2.extensions.POLL_WRITE:
+            elif state == POLL_WRITE:
                 retval = select.select([], [self._conn.fileno()], [], timeout)
-            elif state == psycopg2.extensions.POLL_READ:
+            elif state == POLL_READ:
                 retval = select.select([self._conn.fileno()], [], [], timeout)
             if retval[0] == retval[1]:
                 raise psycopg2.OperationalError("timeout for connection")
