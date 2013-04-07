@@ -121,11 +121,13 @@ class ConnectionPool(object):
         if cursor_factory is not None:
             cursor_kwargs["cursor_factory"] = cursor_factory
 
+        error = None
         if connection is not None:
             try:
                 connection.cursor(function, function_args, callback, cursor_kwargs)
                 return
             except (DatabaseError, InterfaceError),  err:  # Recover from lost connection
+                error = err
                 log.warning('Requested connection was closed. Reason: %s' % err.message)
                 connection in self._pool and self._pool.remove(connection)
 
@@ -133,7 +135,7 @@ class ConnectionPool(object):
         if not transaction:
             self.get_connection(callback=self.new_cursor, callback_args=[function, function_args, cursor_factory, callback])
         else:
-            raise TransactionError
+            raise error
 
     def close(self):
         """Close all open connections in the pool.
@@ -150,8 +152,6 @@ class ConnectionPool(object):
 class PoolError(Exception):
     pass
 
-class TransactionError(Exception):
-    pass
 
 class AsyncConnection(object):
     """An asynchronous connection object.
