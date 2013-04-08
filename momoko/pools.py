@@ -90,14 +90,14 @@ class ConnectionPool(object):
                 return conn
         return None
 
-    def get_connection(self, callback = None, callback_args=[]):
-        """Get a connection, trying available ones, and if not available - create a new one;
-
-        Afterwards, the callback will be called
+    def get_connection(self, callback=None, callback_args=[]):
+        """Get a connection, trying available ones, and if not
+        available - create a new one; Afterwards, the callback will be
+        called
         """
         connection = self._get_free_conn()
         if connection is None:
-            self._new_conn(callback,callback_args)
+            self._new_conn(callback, callback_args)
         else:
             callback(*(callback_args+[connection]))
 
@@ -179,7 +179,7 @@ class AsyncConnection(object):
         self._callbacks = [partial(callback, cursor)]
 
         # Connection state should be 1 (write)
-        self._ioloop.update_handler(self._fileno, IOLoop.READ)
+        self._ioloop.add_handler(self._fileno, self._io_callback, IOLoop.WRITE)
 
     def _io_callback(self, fd, events):
         try:
@@ -192,7 +192,7 @@ class AsyncConnection(object):
             if state == POLL_OK:
                 self._ioloop.remove_handler(self._fileno)
                 for callback in self._callbacks:
-                    callback(error)
+                    callback(None)
             elif state == POLL_READ:
                 self._ioloop.update_handler(self._fileno, IOLoop.READ)
             elif state == POLL_WRITE:
@@ -241,16 +241,20 @@ class AsyncConnection(object):
         # Set connection state
         self._ioloop.add_handler(self._fileno, self._io_callback, IOLoop.WRITE)
 
-    def _wait(self, timeout):
-        assert self._conn
-        while 1:
+    def wait(self, timeout):
+        assert hasattr(self._conn, 'poll')
+        while True:
             state = self._conn.poll()
             if state == POLL_OK:
+                # connected
                 break
             elif state == POLL_WRITE:
                 retval = select.select([], [self._conn.fileno()], [], timeout)
             elif state == POLL_READ:
                 retval = select.select([self._conn.fileno()], [], [], timeout)
+            else:
+                raise Exception("Unexpected result from poll: %r", state)
+            # timeout!!
             if retval[0] == retval[1]:
                 raise psycopg2.OperationalError("timeout for connection")
 

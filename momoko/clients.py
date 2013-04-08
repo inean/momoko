@@ -16,20 +16,20 @@ from contextlib import contextmanager
 from .pools import ConnectionPool
 from .utils import BatchQuery, QueryChain, TransactionChain
 
+
 class AsyncClient(object):
     """The ``AsyncClient`` class is a wrapper for ``AsyncPool``, ``BatchQuery``
      ``TransactionChain'' and ``QueryChain``. It also provides the ``execute``
      and ``callproc`` functions.
 
     """
-    TIMEOUT = 10
-    
+
     def __init__(self, *args, **kwargs):
         self._pool = ConnectionPool(*args, **kwargs)
 
     def get_connection(self, callback, callback_args=[]):
         self._pool.get_connection(callback, callback_args)
-        
+
     def batch(self, queries, callback=None):
         """Run a batch of queries all at once.
 
