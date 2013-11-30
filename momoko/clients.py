@@ -9,10 +9,6 @@
     :license: MIT, see LICENSE for more details.
 """
 
-import functools
-import logging as log
-from contextlib import contextmanager
-
 from .pools import ConnectionPool
 from .utils import BatchQuery, QueryChain, TransactionChain
 
@@ -26,6 +22,11 @@ class AsyncClient(object):
 
     def __init__(self, *args, **kwargs):
         self._pool = ConnectionPool(*args, **kwargs)
+
+    @property
+    def pool(self):
+        """Get Client connection Pool"""
+        return self._pool
 
     def get_connection(self, callback, callback_args=[]):
         self._pool.get_connection(callback, callback_args)
@@ -54,14 +55,16 @@ class AsyncClient(object):
         :return: A dictionary with the same keys as the given queries with the
                  resulting cursors as values.
 
-        .. _connection.cursor: http://initd.org/psycopg/docs/connection.html#connection.cursor
+        .. _connection.cursor:
+        http://initd.org/psycopg/docs/connection.html#connection.cursor
         """
         return BatchQuery(self, queries, callback)
 
     def transaction(self, statements, callback=None):
-        """Run a chain of statements in the given order using a single connection.
-        The statements will be wrapped between a "begin;" and a "commit;". The
-        connection will be unavailable while the chain is running.
+        """Run a chain of statements in the given order using a single
+        connection.  The statements will be wrapped between a "begin;"
+        and a "commit;". The connection will be unavailable while the
+        chain is running.
 
         A list/tuple with statements looks like this::
 
@@ -79,7 +82,9 @@ class AsyncClient(object):
                          queries are finished. Optional.
         :return: A list with the resulting cursors.
 
-        .. _connection.cursor: http://initd.org/psycopg/docs/connection.html#connection.cursor
+        .. _connection.cursor:
+        http://initd.org/psycopg/docs/connection.html#connection.cursor
+
         """
         return TransactionChain(self, statements, callback)
 
@@ -102,11 +107,13 @@ class AsyncClient(object):
                          queries are finished. Optional.
         :return: A list with the resulting cursors.
 
-        .. _connection.cursor: http://initd.org/psycopg/docs/connection.html#connection.cursor
+        .. _connection.cursor:
+        http://initd.org/psycopg/docs/connection.html#connection.cursor
         """
         return QueryChain(self, queries, callback)
 
-    def execute(self, operation, parameters=(), cursor_factory=None, callback=None, connection = None):
+    def execute(self, operation, parameters=(), cursor_factory=None,
+                callback=None, connection = None):
         """Prepare and execute a database operation (query or command).
 
         Parameters may be provided as sequence or mapping and will be bound to
@@ -123,36 +130,46 @@ class AsyncClient(object):
         :param callback: A callable that is executed once the operation is
                          finished. Optional.
 
-        .. _connection.cursor: http://initd.org/psycopg/docs/connection.html#connection.cursor
+        .. _connection.cursor:
+        http://initd.org/psycopg/docs/connection.html#connection.cursor
         """
         if connection:
-            self._pool.new_cursor('execute', (operation, parameters), cursor_factory, callback, connection, transaction=True)
+            self._pool.new_cursor('execute', (operation, parameters),
+                                  cursor_factory, callback, True, connection)
         else:
-            self._pool.new_cursor('execute', (operation, parameters), cursor_factory, callback)
+            self._pool.new_cursor('execute', (operation, parameters),
+                                  cursor_factory, callback, False)
 
-    def callproc(self, procname, parameters=None, cursor_factory=None, callback=None, connection = None):
+    def callproc(self, procname, parameters=None, cursor_factory=None,
+                 callback=None, connection=None):
         """Call a stored database procedure with the given name.
 
-        The sequence of parameters must contain one entry for each argument that
-        the procedure expects. The result of the call is returned as modified
-        copy of the input sequence. Input parameters are left untouched, output
-        and input/output parameters replaced with possibly new values.
+        The sequence of parameters must contain one entry for each
+        argument that the procedure expects. The result of the call is
+        returned as modified copy of the input sequence. Input
+        parameters are left untouched, output and input/output
+        parameters replaced with possibly new values.
 
         The procedure may also provide a result set as output. This must then
         be made available through the standard ``fetch*()`` methods.
 
         :param procname: The name of the procedure.
-        :param parameters: A sequence with parameters. This is ``None`` by default.
+        :param parameters: A sequence with parameters. This is
+        ``None`` by default.
         :param cursor_factory: A valid factory to Psycopg's  cursor
         :param callback: A callable that is executed once the procedure is
                          finished. Optional.
 
-        .. _connection.cursor: http://initd.org/psycopg/docs/connection.html#connection.cursor
+        .. _connection.cursor:
+        http://initd.org/psycopg/docs/connection.html#connection.cursor
+
         """
         if connection:
-            self._pool.new_cursor('callproc', (procname, parameters), cursor_factory, callback, connection, transaction=True)
+            self._pool.new_cursor('callproc', (procname, parameters),
+                                  cursor_factory, callback, True, connection)
         else:
-            self._pool.new_cursor('callproc', (procname, parameters), cursor_factory, callback)
+            self._pool.new_cursor('callproc', (procname, parameters),
+                                  cursor_factory, callback, False)
 
     def close(self):
         """Close all connections in the connection pool.

@@ -14,7 +14,7 @@ import select
 import logging as log
 
 import psycopg2
-from psycopg2 import DatabaseError, InterfaceError
+from psycopg2 import DatabaseError, InterfaceError, OperationalError
 from psycopg2.extensions import POLL_OK, POLL_READ, POLL_WRITE
 
 from functools import partial
@@ -22,8 +22,7 @@ from tornado.ioloop import IOLoop
 
 
 class ConnectionPool(object):
-    """
-    Asynchronous connection pool acting as a single connection.
+    """Asynchronous connection pool acting as a single connection.
 
     `dsn` and `connection_factory` are passed to `momoko.connection.Connection`
     when a new connection is created. It also contains the documentation about
@@ -34,20 +33,25 @@ class ConnectionPool(object):
     - **maxconn** --
         Maximum amount of connections supported by the pool.
     - **cleanup_timeout** --
-        Time in seconds between pool cleanups. Unused connections
-        are closed and removed from the pool until only `minconn` are left. When
-        an integer below `1` is used the pool cleaner will be disabled.
+        Time in seconds between pool cleanups. Unused connections are
+        closed and removed from the pool until only `minconn` are
+        left. When an integer below `1` is used the pool cleaner will
+        be disabled.
     - **ioloop** --
         An instance of Tornado's IOLoop.
+
     """
-    def __init__(self, dsn, connection_factory=None, size=1, ioloop=None):
+    def __init__(self, dsn, connection_factory=None, size=1,
+                 connection_timeout=500, backup_pool=None, ioloop=None):
         self._dsn = dsn
         self._minconn = size
         self._maxconn = size
         self._connection_factory = connection_factory
+        self._connection_timeout = connection_timeout
         self._ioloop = ioloop or IOLoop.instance()
         self._last_reconnect = 0
         self._pool = []
+        self._backup_pool = backup_pool
 
         self.closed = False
 
@@ -59,24 +63,32 @@ class ConnectionPool(object):
     def _new_conn(self, callback=None, callback_args=[]):
         """Create a new connection.
 
-        :param callback_args: Parameters for the callback - connection will be appended
-        to the parameters
+        :param callback_args: Parameters for the callback - connection
+        will be appended to the parameters
+
         """
+        def append_connection(connection, error):
+            if not error:
+                self._pool.append(connection)
+
         if len(self._pool) > self._maxconn:
             raise PoolError('connection pool exhausted')
-        timeout = self._last_reconnect + .25 # 1/4 second delay between reconnection
+        # 1/4 second delay between reconnection
+        timeout = self._last_reconnect + .25
         timenow = time.time()
         if timenow > timeout or len(self._pool) <= self._minconn:
             self._last_reconnect = timenow
             conn = AsyncConnection(self._ioloop)
-            callbacks = [partial(lambda conn, _: self._pool.append, conn)] # add new connection to the pool
+            # add new connection to the pool
+            callbacks = [lambda x: append_connection(conn, x)]
             if callback:
                 callbacks.append(partial(callback, *(callback_args+[conn])))
 
             conn.open(self._dsn, self._connection_factory, callbacks)
         else:
             # recursive timeout call, retaining the parameters
-            self._ioloop.add_timeout(timeout, partial(self._new_conn, callback, callback_args))
+            func = partial(self._new_conn, callback, callback_args)
+            self._ioloop.add_timeout(timeout, func)
 
     def _get_free_conn(self):
         """Look for a free connection and return it.
@@ -99,22 +111,28 @@ class ConnectionPool(object):
         if connection is None:
             self._new_conn(callback, callback_args)
         else:
-            callback(*(callback_args+[connection]))
+            callback(*(callback_args+[connection, None]))
 
+    def new_cursor(self, function, function_args=(), cursor_factory=None,
+                   callback=None, transaction=False, connection=None,
+                   error=None):
 
-    def new_cursor(self, function, function_args=(), cursor_factory=None, callback=None, connection=None, transaction=False):
         """Create a new cursor.
 
-        If there's no connection available, a new connection will be created and
-        `new_cursor` will be called again after the connection has been made.
+        If there's no connection available, a new connection will be
+        created and `new_cursor` will be called again after the
+        connection has been made.
 
         :param function: ``execute``, ``executemany`` or ``callproc``.
-        :param function_args: A tuple with the arguments for the specified function.
-        :param callback: A callable that is executed once the operation is done.
-        :param cursor_kwargs: A dictionary with Psycopg's `connection.cursor`_ arguments.
+        :param function_args: A tuple with the arguments for the
+        specified function.
+        :param callback: A callable that is executed once the
+        operation is done.
+        :param cursor_kwargs: A dictionary with Psycopg's
+        `connection.cursor`_ arguments.
         :param connection: An ``AsyncConnection`` connection. Optional.
-
-        .. _connection.cursor: http://initd.org/psycopg/docs/connection.html#connection.cursor
+        .. _connection.cursor:
+        http://initd.org/psycopg/docs/connection.html#connection.cursor
         """
 
         cursor_kwargs = {}
@@ -122,18 +140,31 @@ class ConnectionPool(object):
             cursor_kwargs["cursor_factory"] = cursor_factory
 
         error = None
+        # On error, try to fetch a new connection from on_error_pool
+        pool = self
+
+        # Check connection timeout
         if connection is not None:
             try:
+                if connection.isexecuting():
+                    connection.wait(self._connection_timeout)
+                # This may happen when server is down. Connection
+                # is busy waiting for server.
                 connection.cursor(function, function_args, callback, cursor_kwargs)
                 return
-            except (DatabaseError, InterfaceError),  err:  # Recover from lost connection
+            # Recover from lost connection
+            except (OperationalError, DatabaseError, InterfaceError),  err:
                 error = err
                 log.warning('Requested connection was closed. Reason: %s' % err.message)
                 connection in self._pool and self._pool.remove(connection)
+                # try backup connection if available
+                if self._backup_pool and isinstance(err, OperationalError):
+                    pool = self._backup_pool
 
         # if no connection, or if exception caught
         if not transaction:
-            self.get_connection(callback=self.new_cursor, callback_args=[function, function_args, cursor_factory, callback])
+            args = [function, function_args, cursor_factory, callback, False]
+            pool.get_connection(callback=pool.new_cursor, callback_args=args)
         else:
             raise error
 
@@ -168,11 +199,14 @@ class AsyncConnection(object):
         """Get a cursor and execute the requested function
 
         :param function: ``execute``, ``executemany`` or ``callproc``.
-        :param function_args: A tuple with the arguments for the specified function.
-        :param callback: A callable that is executed once the operation is done.
-        :param cursor_kwargs: A dictionary with Psycopg's `connection.cursor`_ arguments.
-
-        .. _connection.cursor: http://initd.org/psycopg/docs/connection.html#connection.cursor
+        :param function_args: A tuple with the arguments for the
+        specified function.
+        :param callback: A callable that is executed once the
+        operation is done.
+        :param cursor_kwargs: A dictionary with Psycopg's
+        `connection.cursor`_ arguments.
+        .. _connection.cursor:
+        http://initd.org/psycopg/docs/connection.html#connection.cursor
         """
         cursor = self._conn.cursor(**cursor_kwargs)
         getattr(cursor, function)(*function_args)
@@ -198,28 +232,30 @@ class AsyncConnection(object):
             elif state == POLL_WRITE:
                 self._ioloop.update_handler(self._fileno, IOLoop.WRITE)
             else:
-                raise psycopg2.OperationalError('poll() returned {0}'.format(state))
+                raise OperationalError('poll() returned {0}'.format(state))
 
     def open(self, dsn, connection_factory=None, callbacks=[]):
-        """
-        Open an asynchronous connection.
+        """Open an asynchronous connection.
 
         - **dsn** --
-            A [Data Source Name][1] string containing one of the collowing values:
+            A [Data Source Name][1] string containing one of the
+            collowing values:
 
             + **dbname** - the database name
             + **user** - user name used to authenticate
             + **password** - password used to authenticate
-            + **host** - database host address (defaults to UNIX socket if not provided)
-            + **port** - connection port number (defaults to 5432 if not provided)
+            + **host** - database host address (defaults to UNIX
+            socket if not provided)
+            + **port** - connection port number (defaults to 5432 if
+            not provided)
 
             Or any other parameter supported by PostgreSQL. See the PostgreSQL
             documentation for a complete list of supported [parameters][2].
 
         - **connection_factory** --
-            The `connection_factory` argument can be used to create non-standard
-            connections. The class returned should be a subclass of
-            [psycopg2.extensions.connection][3].
+            The `connection_factory` argument can be used to create
+            non-standard connections. The class returned should be a
+            subclass of [psycopg2.extensions.connection][3].
 
         - **callbacks** --
             Sequence of callables. These are executed after the connection has
@@ -228,6 +264,7 @@ class AsyncConnection(object):
         [1]: http://en.wikipedia.org/wiki/Data_Source_Name
         [2]: http://www.postgresql.org/docs/current/static/libpq-connect.html#LIBPQ-PQCONNECTDBPARAMS
         [3]: http://initd.org/psycopg/docs/connection.html#connection
+
         """
         args = []
         if not connection_factory is None:
@@ -272,6 +309,7 @@ class AsyncConnection(object):
         return self._conn.closed
 
     def isexecuting(self):
-        """Return True if the connection is executing an asynchronous operation.
+        """Return True if the connection is executing an asynchronous
+        operation.
         """
         return self._conn.isexecuting()
