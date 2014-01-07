@@ -52,12 +52,7 @@ class ConnectionPool(object):
         self._last_reconnect = 0
         self._pool = []
         self._backup_pool = backup_pool
-
         self.closed = False
-
-        #for i in range(self._minconn):
-        for _ in range(self._minconn):
-            self._new_conn()
         self._last_reconnect = time.time()
 
     def _new_conn(self, callback=None, callback_args=[]):
@@ -97,6 +92,11 @@ class ConnectionPool(object):
         """
         if self.closed:
             raise PoolError('connection pool is closed')
+
+        # Purge non running conns
+        self._pool[:] = [c for c in self._pool if c._ioloop._running]
+
+        # process pool
         for conn in self._pool:
             if not conn.isexecuting():
                 return conn
